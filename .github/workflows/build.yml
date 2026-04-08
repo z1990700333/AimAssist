@@ -28,15 +28,10 @@ jobs:
         run: |
           yes | sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1" || true
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          gradle-version: '8.9'
 
       - name: Download ncnn Android Vulkan SDK
         run: |
@@ -50,36 +45,40 @@ jobs:
           ls -la ncnn-20260113-android-vulkan/
           ls -la ncnn-20260113-android-vulkan/arm64-v8a/lib/
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Build Release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: gradle assembleRelease --stacktrace
 
       - name: Verify native library
+        if: always()
         run: |
           echo "=== 检查 libaimassist.so ==="
-          find app/build -name "libaimassist.so" -exec ls -lh {} \;
+          find app/build -name "libaimassist.so" -exec ls -lh {} \; 2>/dev/null || echo "未找到 .so 文件"
           echo ""
           echo "=== 验证 16KB 页面对齐 ==="
-          SO_FILE=$(find app/build -name "libaimassist.so" -path "*/arm64-v8a/*" | head -1)
+          SO_FILE=$(find app/build -name "libaimassist.so" -path "*/arm64-v8a/*" 2>/dev/null | head -1)
           if [ -n "$SO_FILE" ]; then
             readelf -l "$SO_FILE" | grep -A1 "LOAD" || true
+          else
+            echo "跳过对齐验证 (未找到 .so)"
           fi
 
       - name: Upload Debug APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: AimAssist-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
+          if-no-files-found: warn
 
       - name: Upload Release APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: AimAssist-release
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
+          if-no-files-found: warn
