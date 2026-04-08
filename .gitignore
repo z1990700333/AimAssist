@@ -1,0 +1,28 @@
+# Android Studio / Gradle
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+*.hprof
+
+# NDK
+.cxx/
+.externalNativeBuild/
+
+# ncnn 预编译库 (太大，不提交到 Git，CI 中自动下载)
+app/src/main/jni/ncnn-*/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Signing
+*.jks
+*.keystore
+
+# Misc
+*.log
+*.tmp
+*.bak

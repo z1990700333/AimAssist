@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AimAssist</string>
+    <string name="app_description">AI 目标检测自动点击</string>
+    
+    <!-- Main Screen -->
+    <string name="start_detection">开始检测</string>
+    <string name="stop_detection">停止检测</string>
+    <string name="settings">设置</string>
+    <string name="model_settings">模型设置</string>
+    <string name="detection_settings">检测设置</string>
+    <string name="click_settings">点击设置</string>
+    <string name="permission_required">需要权限</string>
+    <string name="grant_permission">授予权限</string>
+    
+    <!-- Status -->
+    <string name="status_idle">待机中</string>
+    <string name="status_running">运行中</string>
+    <string name="status_detecting">检测中</string>
+    <string name="status_error">错误</string>
+    <string name="fps_label">FPS:</string>
+    <string name="objects_label">目标:</string>
+    <string name="inference_time">推理时间:</string>
+    
+    <!-- Settings -->
+    <string name="confidence_threshold">置信度阈值</string>
+    <string name="nms_threshold">NMS阈值</string>
+    <string name="input_size">输入尺寸</string>
+    <string name="model_path">模型路径</string>
+    <string name="param_file">参数文件 (.param)</string>
+    <string name="bin_file">权重文件 (.bin)</string>
+    <string name="select_model">选择模型</string>
+    <string name="click_delay">点击延迟 (ms)</string>
+    <string name="click_offset_x">点击偏移 X</string>
+    <string name="click_offset_y">点击偏移 Y</string>
+    <string name="enable_auto_click">启用自动点击</string>
+    <string name="target_class">目标类别</string>
+    <string name="inference_threads">推理线程数</string>
+    <string name="gpu_inference">GPU加速</string>
+    <string name="show_preview">显示预览</string>
+    <string name="save_detections">保存检测结果</string>
+    
+    <!-- Descriptions -->
+    <string name="confidence_desc">只显示置信度高于此值的目标</string>
+    <string name="nms_desc">非极大值抑制阈值，去除重叠框</string>
+    <string name="input_size_desc">模型输入图像尺寸</string>
+    <string name="click_delay_desc">检测到目标后延迟多久点击</string>
+    <string name="offset_desc">相对于检测框中心的点击偏移</string>
+    
+    <!-- Toast Messages -->
+    <string name="service_started">检测服务已启动</string>
+    <string name="service_stopped">检测服务已停止</string>
+    <string name="permission_denied">权限被拒绝</string>
+    <string name="model_loaded">模型加载成功</string>
+    <string name="model_load_failed">模型加载失败</string>
+    <string name="accessibility_required">需要无障碍权限来实现自动点击</string>
+    <string name="overlay_required">需要悬浮窗权限</string>
+    
+    <!-- Navigation -->
+    <string name="back">返回</string>
+    <string name="save">保存</string>
+    <string name="reset">重置</string>
+    <string name="apply">应用</string>
+    
+    <!-- Stats -->
+    <string name="total_detections">总检测数</string>
+    <string name="total_clicks">总点击数</string>
+    <string name="avg_inference_time">平均推理时间</string>
+    <string name="runtime">运行时间</string>
+</resources>
