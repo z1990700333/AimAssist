@@ -45,6 +45,7 @@ class NcnnDetector {
         )
     }
 
+    @Volatile
     private var initialized = false
 
     // ========================================================================

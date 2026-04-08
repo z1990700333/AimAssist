@@ -249,6 +249,49 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
+                    <!-- Click Mode -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="点击模式"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="无障碍模式无需Root，uinput模式需要Root但延迟更低"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginBottom="8dp" />
+
+                    <RadioGroup
+                        android:id="@+id/rgClickMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="16dp">
+
+                        <com.google.android.material.radiobutton.MaterialRadioButton
+                            android:id="@+id/rbAccessibility"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="无障碍服务"
+                            android:textSize="13sp"
+                            android:textColor="@color/text_primary"
+                            android:checked="true" />
+
+                        <com.google.android.material.radiobutton.MaterialRadioButton
+                            android:id="@+id/rbUinput"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Root uinput"
+                            android:textSize="13sp"
+                            android:textColor="@color/text_primary" />
+                    </RadioGroup>
+
                     <!-- Click Delay -->
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.AimAssist.TextInput"

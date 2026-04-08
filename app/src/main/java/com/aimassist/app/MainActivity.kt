@@ -1,9 +1,11 @@
 package com.aimassist.app
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -25,11 +27,12 @@ import com.aimassist.app.service.AutoClickService
 import com.aimassist.app.service.DetectionService
 import com.aimassist.app.utils.SettingsManager
 import kotlinx.coroutines.*
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val settings = SettingsManager.getInstance()
+    private val settings by lazy { SettingsManager.getInstance() }
     private var detectionService: DetectionService? = null
     private var isBound = false
 
@@ -71,6 +74,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 接收 DetectionService 启动失败的广播 */
+    private val errorReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == DetectionService.ACTION_START_FAILED) {
+                val msg = intent.getStringExtra(DetectionService.EXTRA_ERROR_MESSAGE) ?: "未知错误"
+                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+                updateUIState(running = false)
+                // 解绑已失败的服务
+                if (isBound) {
+                    unbindService(serviceConnection)
+                    isBound = false
+                    detectionService = null
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -83,8 +103,33 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        updateUIState()
         updateModelInfo()
+
+        // 如果服务正在运行但未绑定，重新绑定
+        if (DetectionService.isRunning() && !isBound) {
+            val intent = Intent(this, DetectionService::class.java)
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        }
+
+        updateUIState()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // 注册错误广播接收器
+        val filter = IntentFilter(DetectionService.ACTION_START_FAILED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(errorReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(errorReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(errorReceiver)
+        } catch (_: Exception) {}
     }
 
     private fun initViews() {
@@ -144,12 +189,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkRequirements(): Boolean {
+        // 检查模型路径是否设置
         if (!settings.isModelLoaded()) {
-            Toast.makeText(this, "请先选择模型文件 (.param + .bin)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "请先在设置中选择模型文件 (.param + .bin)", Toast.LENGTH_LONG).show()
             startActivity(Intent(this, SettingsActivity::class.java))
             return false
         }
 
+        // 检查模型文件是否真实存在
+        val paramPath = settings.paramFilePath
+        val binPath = settings.binFilePath
+        if (paramPath == null || !File(paramPath).exists()) {
+            Toast.makeText(this, "模型参数文件 (.param) 不存在，请重新选择", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return false
+        }
+        if (binPath == null || !File(binPath).exists()) {
+            Toast.makeText(this, "模型权重文件 (.bin) 不存在，请重新选择", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return false
+        }
+
+        // 检查无障碍服务 (仅在无障碍点击模式下)
         if (settings.enableAutoClick && settings.clickMode == 0 && !AutoClickService.isRunning()) {
             showAccessibilityDialog()
             return false
@@ -176,7 +237,9 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
 
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        // 绑定服务以获取统计回调
+        val bindIntent = Intent(this, DetectionService::class.java)
+        bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         updateUIState(running = true)
         Toast.makeText(this, R.string.service_started, Toast.LENGTH_SHORT).show()
@@ -279,6 +342,7 @@ class MainActivity : AppCompatActivity() {
         stopUIUpdates()
         if (isBound) {
             unbindService(serviceConnection)
+            isBound = false
         }
     }
 }

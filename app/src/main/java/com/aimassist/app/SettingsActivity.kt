@@ -16,7 +16,7 @@ import java.io.FileOutputStream
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
-    private val settings = SettingsManager.getInstance()
+    private val settings by lazy { SettingsManager.getInstance() }
 
     // 当前选择的文件类型
     private var selectingFileType = FileType.PARAM
@@ -54,7 +54,7 @@ class SettingsActivity : AppCompatActivity() {
             filePickerLauncher.launch("application/octet-stream")
         }
 
-        // Bin 文件选择 (恢复显示)
+        // Bin 文件选择
         binding.tilBinFile.visibility = android.view.View.VISIBLE
         binding.tilBinFile.hint = "模型权重文件 (.bin)"
         binding.etBinFile.setOnClickListener {
@@ -64,6 +64,14 @@ class SettingsActivity : AppCompatActivity() {
         binding.tilBinFile.setEndIconOnClickListener {
             selectingFileType = FileType.BIN
             filePickerLauncher.launch("application/octet-stream")
+        }
+
+        // 点击模式选择
+        binding.rgClickMode.setOnCheckedChangeListener { _, checkedId ->
+            when (checkedId) {
+                binding.rbAccessibility.id -> settings.clickMode = 0
+                binding.rbUinput.id -> settings.clickMode = 1
+            }
         }
 
         // 保存按钮
@@ -83,6 +91,12 @@ class SettingsActivity : AppCompatActivity() {
         binding.etClickDelay.setText(settings.clickDelay.toString())
         binding.etClickOffsetX.setText(settings.clickOffsetX.toString())
         binding.etClickOffsetY.setText(settings.clickOffsetY.toString())
+
+        // 加载点击模式
+        when (settings.clickMode) {
+            0 -> binding.rbAccessibility.isChecked = true
+            1 -> binding.rbUinput.isChecked = true
+        }
     }
 
     private fun handleFileSelection(uri: Uri) {

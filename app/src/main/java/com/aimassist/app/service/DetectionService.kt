@@ -31,6 +31,8 @@ import com.aimassist.app.ncnn.NcnnDetector
 import com.aimassist.app.utils.SettingsManager
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 屏幕截图和目标检测服务 - ncnn Vulkan 零拷贝管线
@@ -48,14 +50,26 @@ class DetectionService : Service() {
     // 检测线程 (HandlerThread，非协程，减少调度开销)
     private var detectionThread: HandlerThread? = null
     private var detectionHandler: Handler? = null
+    private val mainHandler = Handler(android.os.Looper.getMainLooper())
 
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
     private val isRunning = AtomicBoolean(false)
-    private val stats = InferenceStats()
+    // 线程安全的统计字段
+    private val statsFps = AtomicInteger(0)
+    private val statsInferenceTimeMs = AtomicLong(0)
+    private val statsTotalDetections = AtomicLong(0)
+    private val statsTotalClicks = AtomicLong(0)
+    private val statsCurrentObjects = AtomicInteger(0)
+    private val statsRuntimeMs = AtomicLong(0)
     private var startTime = 0L
+
+    /** 最近一次启动失败的错误信息，主线程可读取 */
+    @Volatile
+    var lastError: String? = null
+        private set
 
     private var onDetectionCallback: ((List<DetectionResult>, Long) -> Unit)? = null
     private var onStatsCallback: ((InferenceStats) -> Unit)? = null
@@ -76,6 +90,10 @@ class DetectionService : Service() {
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
 
+        /** 广播 Action：检测启动失败 */
+        const val ACTION_START_FAILED = "com.aimassist.app.ACTION_START_FAILED"
+        const val EXTRA_ERROR_MESSAGE = "error_message"
+
         private var instance: DetectionService? = null
 
         fun isRunning(): Boolean = instance?.isRunning?.get() ?: false
@@ -95,30 +113,47 @@ class DetectionService : Service() {
     override fun onBind(intent: Intent): IBinder = binder
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            // 系统重启了服务但 MediaProjection token 已失效，直接停止
+            Log.w(TAG, "Service restarted with null intent, stopping")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        when (intent.action) {
             ACTION_START -> {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
                 @Suppress("DEPRECATION")
                 val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
                 if (resultCode != -1 && data != null) {
                     startDetection(resultCode, data)
+                } else {
+                    broadcastError("无效的 MediaProjection 参数")
+                    stopSelf()
                 }
             }
             ACTION_STOP -> stopDetection()
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startDetection(resultCode: Int, data: Intent) {
         if (isRunning.get()) return
 
         if (!initializeDetector()) {
-            Log.e(TAG, "检测器初始化失败")
+            val msg = "检测器初始化失败: 请检查模型文件是否正确"
+            Log.e(TAG, msg)
+            broadcastError(msg)
+            stopSelf()
             return
         }
 
         if (!initializeMediaProjection(resultCode, data)) {
-            Log.e(TAG, "MediaProjection 初始化失败")
+            val msg = "MediaProjection 初始化失败: 请重新授权屏幕录制"
+            Log.e(TAG, msg)
+            broadcastError(msg)
+            detector?.release()
+            detector = null
+            stopSelf()
             return
         }
 
@@ -129,7 +164,8 @@ class DetectionService : Service() {
 
         isRunning.set(true)
         startTime = System.nanoTime()
-        stats.runtimeMs = 0
+        statsRuntimeMs.set(0)
+        lastError = null
 
         startForeground(NOTIFICATION_ID, createNotification())
         startDetectionLoop()
@@ -228,8 +264,6 @@ class DetectionService : Service() {
             override fun run() {
                 if (!isRunning.get()) return
 
-                val frameStartTime = System.nanoTime()
-
                 // 获取最新帧
                 val image: Image? = try {
                     imageReader?.acquireLatestImage()
@@ -245,12 +279,12 @@ class DetectionService : Service() {
                     frameCount++
                     val elapsed = (System.nanoTime() - fpsStartTime) / 1_000_000L
                     if (elapsed >= 1000) {
-                        stats.fps = frameCount
+                        statsFps.set(frameCount)
                         frameCount = 0
                         fpsStartTime = System.nanoTime()
                     }
 
-                    stats.runtimeMs = (System.nanoTime() - startTime) / 1_000_000L
+                    statsRuntimeMs.set((System.nanoTime() - startTime) / 1_000_000L)
                 }
 
                 // 调度下一帧
@@ -287,16 +321,17 @@ class DetectionService : Service() {
 
             // 获取耗时
             val timings = det.getTimings()
-            val inferenceTime = timings[4].toLong() // total time
+            val inferenceTime = if (timings.size >= 5) timings[4].toLong() else 0L
 
-            stats.inferenceTimeMs = inferenceTime
-            stats.currentObjects = results.size
-            stats.totalDetections += results.size
+            statsInferenceTimeMs.set(inferenceTime)
+            statsCurrentObjects.set(results.size)
+            statsTotalDetections.addAndGet(results.size.toLong())
 
             // 回调到主线程
-            Handler(mainLooper).post {
+            val snapshot = buildStatsSnapshot()
+            mainHandler.post {
                 onDetectionCallback?.invoke(results, inferenceTime)
-                onStatsCallback?.invoke(stats)
+                onStatsCallback?.invoke(snapshot)
             }
 
             // 自动点击
@@ -332,13 +367,13 @@ class DetectionService : Service() {
                 } else {
                     AutoClickService.click(clickX, clickY, 0)
                 }
-                stats.totalClicks++
+                statsTotalClicks.incrementAndGet()
             }
             1 -> {
                 // Root uinput 模式
                 if (uinputFd >= 0) {
                     detector?.nativeUinputTap(clickX.toInt(), clickY.toInt())
-                    stats.totalClicks++
+                    statsTotalClicks.incrementAndGet()
                 }
             }
         }
@@ -400,7 +435,28 @@ class DetectionService : Service() {
         onStatsCallback = callback
     }
 
-    fun getStats(): InferenceStats = stats
+    fun getStats(): InferenceStats = buildStatsSnapshot()
+
+    private fun buildStatsSnapshot(): InferenceStats {
+        return InferenceStats(
+            fps = statsFps.get(),
+            inferenceTimeMs = statsInferenceTimeMs.get(),
+            totalDetections = statsTotalDetections.get(),
+            totalClicks = statsTotalClicks.get(),
+            currentObjects = statsCurrentObjects.get(),
+            runtimeMs = statsRuntimeMs.get()
+        )
+    }
+
+    private fun broadcastError(message: String) {
+        lastError = message
+        Log.e(TAG, "广播错误: $message")
+        val intent = Intent(ACTION_START_FAILED).apply {
+            putExtra(EXTRA_ERROR_MESSAGE, message)
+            setPackage(packageName)
+        }
+        sendBroadcast(intent)
+    }
 
     override fun onDestroy() {
         super.onDestroy()
