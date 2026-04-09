@@ -309,6 +309,7 @@ class MainActivity : AppCompatActivity() {
         // 传递 MediaProjection 参数
         val intent = Intent(this, DetectionService::class.java).apply {
             action = DetectionService.ACTION_START
+            putExtra(DetectionService.EXTRA_HAS_PROJECTION, true)
             putExtra(DetectionService.EXTRA_RESULT_CODE, projectionResultCode)
             putExtra(DetectionService.EXTRA_DATA, data)
         }

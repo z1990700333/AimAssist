@@ -89,6 +89,7 @@ class DetectionService : Service() {
         const val ACTION_STOP = "action_stop"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_DATA = "data"
+        const val EXTRA_HAS_PROJECTION = "has_projection"
 
         /** 广播 Action：检测启动失败 */
         const val ACTION_START_FAILED = "com.aimassist.app.ACTION_START_FAILED"
@@ -114,8 +115,6 @@ class DetectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            // 系统重启了服务但 MediaProjection token 已失效
-            // 必须先 startForeground 再 stopSelf，否则 ANR
             startForeground(NOTIFICATION_ID, createNotification())
             stopSelf()
             return START_NOT_STICKY
@@ -125,7 +124,8 @@ class DetectionService : Service() {
                 // 必须立即 startForeground，否则 startForegroundService 后 5 秒 ANR
                 startForeground(NOTIFICATION_ID, createNotification())
 
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
+                val hasProjection = intent.getBooleanExtra(EXTRA_HAS_PROJECTION, false)
+                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
                 } else {
@@ -133,12 +133,12 @@ class DetectionService : Service() {
                     intent.getParcelableExtra(EXTRA_DATA)
                 }
 
-                Log.i(TAG, "ACTION_START: resultCode=$resultCode, data=${data != null}")
+                Log.i(TAG, "ACTION_START: hasProjection=$hasProjection, resultCode=$resultCode, data=${data != null}")
 
-                if (resultCode != -1 && data != null) {
+                if (hasProjection && data != null) {
                     startDetection(resultCode, data)
                 } else {
-                    broadcastError("无效的 MediaProjection 参数 (resultCode=$resultCode, data=${data != null})")
+                    broadcastError("无效的 MediaProjection 参数 (hasProjection=$hasProjection, resultCode=$resultCode, data=${data != null})")
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
