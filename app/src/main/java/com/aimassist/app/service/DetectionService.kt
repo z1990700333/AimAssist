@@ -114,20 +114,32 @@ class DetectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
-            // 系统重启了服务但 MediaProjection token 已失效，直接停止
-            Log.w(TAG, "Service restarted with null intent, stopping")
+            // 系统重启了服务但 MediaProjection token 已失效
+            // 必须先 startForeground 再 stopSelf，否则 ANR
+            startForeground(NOTIFICATION_ID, createNotification())
             stopSelf()
             return START_NOT_STICKY
         }
         when (intent.action) {
             ACTION_START -> {
+                // 必须立即 startForeground，否则 startForegroundService 后 5 秒 ANR
+                startForeground(NOTIFICATION_ID, createNotification())
+
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-                @Suppress("DEPRECATION")
-                val data = intent.getParcelableExtra<Intent>(EXTRA_DATA)
+                val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_DATA)
+                }
+
+                Log.i(TAG, "ACTION_START: resultCode=$resultCode, data=${data != null}")
+
                 if (resultCode != -1 && data != null) {
                     startDetection(resultCode, data)
                 } else {
-                    broadcastError("无效的 MediaProjection 参数")
+                    broadcastError("无效的 MediaProjection 参数 (resultCode=$resultCode, data=${data != null})")
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
             }
@@ -143,6 +155,7 @@ class DetectionService : Service() {
             val msg = "检测器初始化失败: 请检查模型文件是否正确"
             Log.e(TAG, msg)
             broadcastError(msg)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
@@ -153,6 +166,7 @@ class DetectionService : Service() {
             broadcastError(msg)
             detector?.release()
             detector = null
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
         }
@@ -167,7 +181,7 @@ class DetectionService : Service() {
         statsRuntimeMs.set(0)
         lastError = null
 
-        startForeground(NOTIFICATION_ID, createNotification())
+        // 通知已在 onStartCommand 中调用 startForeground
         startDetectionLoop()
 
         Log.i(TAG, "检测已启动 (ncnn Vulkan)")

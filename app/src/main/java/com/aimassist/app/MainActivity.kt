@@ -23,6 +23,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.aimassist.app.data.InferenceStats
 import com.aimassist.app.databinding.ActivityMainBinding
+import com.aimassist.app.ncnn.NcnnDetector
 import com.aimassist.app.service.AutoClickService
 import com.aimassist.app.service.DetectionService
 import com.aimassist.app.utils.SettingsManager
@@ -35,14 +36,21 @@ class MainActivity : AppCompatActivity() {
     private val settings by lazy { SettingsManager.getInstance() }
     private var detectionService: DetectionService? = null
     private var isBound = false
+    private var isModelReady = false
 
     private var uiUpdateJob: Job? = null
+
+    // 保存 MediaProjection 结果，供服务启动时使用
+    private var projectionResultCode: Int = 0
+    private var projectionData: Intent? = null
 
     private val mediaProjectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
-            startDetectionService(result.resultCode, result.data!!)
+            projectionResultCode = result.resultCode
+            projectionData = result.data
+            startDetectionService()
         } else {
             Toast.makeText(this, "需要屏幕录制权限", Toast.LENGTH_SHORT).show()
         }
@@ -81,9 +89,8 @@ class MainActivity : AppCompatActivity() {
                 val msg = intent.getStringExtra(DetectionService.EXTRA_ERROR_MESSAGE) ?: "未知错误"
                 Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
                 updateUIState(running = false)
-                // 解绑已失败的服务
                 if (isBound) {
-                    unbindService(serviceConnection)
+                    try { unbindService(serviceConnection) } catch (_: Exception) {}
                     isBound = false
                     detectionService = null
                 }
@@ -116,7 +123,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // 注册错误广播接收器
         val filter = IntentFilter(DetectionService.ACTION_START_FAILED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(errorReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -127,9 +133,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        try {
-            unregisterReceiver(errorReceiver)
-        } catch (_: Exception) {}
+        try { unregisterReceiver(errorReceiver) } catch (_: Exception) {}
     }
 
     private fun initViews() {
@@ -147,6 +151,11 @@ class MainActivity : AppCompatActivity() {
             stopDetection()
         }
 
+        // 加载模型按钮
+        binding.btnLoadModel.setOnClickListener {
+            loadModel()
+        }
+
         binding.sliderConfidence.addOnChangeListener { _, value, _ ->
             settings.confidenceThreshold = value
             binding.tvConfidenceValue.text = String.format("%.2f", value)
@@ -159,6 +168,75 @@ class MainActivity : AppCompatActivity() {
             settings.enableAutoClick = isChecked
             if (isChecked && settings.clickMode == 0 && !AutoClickService.isRunning()) {
                 showAccessibilityDialog()
+            }
+        }
+    }
+
+    /**
+     * 加载模型 - 在主页面直接验证并预加载 ncnn 模型
+     */
+    private fun loadModel() {
+        val paramPath = settings.paramFilePath
+        val binPath = settings.binFilePath
+
+        if (paramPath.isNullOrEmpty() || binPath.isNullOrEmpty()) {
+            Toast.makeText(this, "请先在设置中选择模型文件", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+
+        if (!File(paramPath).exists()) {
+            Toast.makeText(this, "参数文件不存在，请重新选择", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        if (!File(binPath).exists()) {
+            Toast.makeText(this, "权重文件不存在，请重新选择", Toast.LENGTH_SHORT).show()
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+
+        // 显示加载中状态
+        binding.btnLoadModel.isEnabled = false
+        binding.btnLoadModel.text = "加载中..."
+        binding.tvModelStatus.visibility = View.VISIBLE
+        binding.tvModelStatus.text = "正在加载模型..."
+        binding.tvModelStatus.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+
+        // 在后台线程加载模型
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val detector = NcnnDetector()
+                    val success = detector.initialize(paramPath, binPath, settings.useGpu)
+                    if (success) {
+                        val inputSize = detector.getModelInputSize()
+                        detector.release()
+                        Pair(true, "模型加载成功 | 输入尺寸: $inputSize")
+                    } else {
+                        Pair(false, "模型加载失败: 请检查文件格式是否正确")
+                    }
+                } catch (e: Exception) {
+                    Pair(false, "模型加载异常: ${e.message}")
+                }
+            }
+
+            // 回到主线程更新 UI
+            binding.btnLoadModel.isEnabled = true
+            binding.tvModelStatus.visibility = View.VISIBLE
+
+            if (result.first) {
+                isModelReady = true
+                binding.btnLoadModel.text = "重新加载"
+                binding.tvModelStatus.text = "✓ ${result.second}"
+                binding.tvModelStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.secondary))
+                Toast.makeText(this@MainActivity, "模型加载成功", Toast.LENGTH_SHORT).show()
+            } else {
+                isModelReady = false
+                binding.btnLoadModel.text = "加载模型"
+                binding.tvModelStatus.text = "✗ ${result.second}"
+                binding.tvModelStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_red))
+                Toast.makeText(this@MainActivity, result.second, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -189,14 +267,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkRequirements(): Boolean {
-        // 检查模型路径是否设置
         if (!settings.isModelLoaded()) {
             Toast.makeText(this, "请先在设置中选择模型文件 (.param + .bin)", Toast.LENGTH_LONG).show()
             startActivity(Intent(this, SettingsActivity::class.java))
             return false
         }
 
-        // 检查模型文件是否真实存在
         val paramPath = settings.paramFilePath
         val binPath = settings.binFilePath
         if (paramPath == null || !File(paramPath).exists()) {
@@ -210,7 +286,6 @@ class MainActivity : AppCompatActivity() {
             return false
         }
 
-        // 检查无障碍服务 (仅在无障碍点击模式下)
         if (settings.enableAutoClick && settings.clickMode == 0 && !AutoClickService.isRunning()) {
             showAccessibilityDialog()
             return false
@@ -224,10 +299,17 @@ class MainActivity : AppCompatActivity() {
         mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
-    private fun startDetectionService(resultCode: Int, data: Intent) {
+    private fun startDetectionService() {
+        val data = projectionData ?: run {
+            Toast.makeText(this, "屏幕录制授权失败，请重试", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 先启动前台服务 (必须在 5 秒内调 startForeground)
+        // 传递 MediaProjection 参数
         val intent = Intent(this, DetectionService::class.java).apply {
             action = DetectionService.ACTION_START
-            putExtra(DetectionService.EXTRA_RESULT_CODE, resultCode)
+            putExtra(DetectionService.EXTRA_RESULT_CODE, projectionResultCode)
             putExtra(DetectionService.EXTRA_DATA, data)
         }
 
@@ -237,7 +319,7 @@ class MainActivity : AppCompatActivity() {
             startService(intent)
         }
 
-        // 绑定服务以获取统计回调
+        // 绑定服务以获取统计回调 (用干净的 Intent，不带 action/extras)
         val bindIntent = Intent(this, DetectionService::class.java)
         bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE)
 
@@ -252,7 +334,7 @@ class MainActivity : AppCompatActivity() {
         startService(intent)
 
         if (isBound) {
-            unbindService(serviceConnection)
+            try { unbindService(serviceConnection) } catch (_: Exception) {}
             isBound = false
         }
 
@@ -318,8 +400,10 @@ class MainActivity : AppCompatActivity() {
             val engine = "ncnn Vulkan"
             val gpu = if (settings.useGpu) "GPU" else "CPU"
             binding.tvModelInfo.text = "引擎: $engine | 输入: ${settings.inputSize} | $gpu"
+            binding.btnLoadModel.text = if (isModelReady) "重新加载" else "加载模型"
         } else {
             binding.tvModelInfo.text = getString(R.string.select_model)
+            binding.btnLoadModel.text = "加载模型"
         }
     }
 
@@ -341,7 +425,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         stopUIUpdates()
         if (isBound) {
-            unbindService(serviceConnection)
+            try { unbindService(serviceConnection) } catch (_: Exception) {}
             isBound = false
         }
     }

@@ -355,7 +355,31 @@
                         android:layout_height="wrap_content"
                         android:text="点击设置选择模型文件"
                         android:textSize="13sp"
-                        android:textColor="@color/text_secondary" />
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginBottom="4dp" />
+
+                    <!-- 模型加载状态 -->
+                    <TextView
+                        android:id="@+id/tvModelStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text=""
+                        android:textSize="12sp"
+                        android:textColor="@color/secondary"
+                        android:visibility="gone"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- 加载模型按钮 -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnLoadModel"
+                        style="@style/Widget.AimAssist.Button.Outlined"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:text="加载模型"
+                        android:textSize="14sp"
+                        app:icon="@drawable/ic_settings"
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
