@@ -201,7 +201,12 @@ class DetectionService : Service() {
         }
 
         detector = NcnnDetector()
-        return detector!!.initialize(paramPath, binPath, settings.useGpu)
+        val success = detector!!.initialize(paramPath, binPath, settings.useGpu)
+        if (success) {
+            // 设置输入尺寸
+            detector!!.nativeSetTargetSize(settings.inputSize)
+        }
+        return success
     }
 
     private fun initializeMediaProjection(resultCode: Int, data: Intent): Boolean {

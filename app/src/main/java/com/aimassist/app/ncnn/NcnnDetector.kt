@@ -12,15 +12,15 @@ import com.aimassist.app.data.DetectionResult
 class NcnnDetector {
 
     /**
-     * JNI 返回的检测对象
+     * JNI 返回的检测对象 - 必须有 public 构造函数供 JNI 调用
      */
-    data class DetectedObject(
-        val x: Float,      // bbox left
-        val y: Float,      // bbox top
-        val w: Float,      // bbox width
-        val h: Float,      // bbox height
-        val label: Int,    // 类别 ID
-        val prob: Float    // 置信度
+    class DetectedObject(
+        @JvmField val x: Float,      // bbox left
+        @JvmField val y: Float,      // bbox top
+        @JvmField val w: Float,      // bbox width
+        @JvmField val h: Float,      // bbox height
+        @JvmField val label: Int,    // 类别 ID
+        @JvmField val prob: Float    // 置信度
     )
 
     companion object {
@@ -48,10 +48,7 @@ class NcnnDetector {
     @Volatile
     private var initialized = false
 
-    // ========================================================================
     // Native 方法声明
-    // ========================================================================
-
     external fun nativeInit(paramPath: String, binPath: String, useGpu: Boolean): Boolean
     external fun nativeDetect(
         hardwareBuffer: HardwareBuffer,
@@ -61,6 +58,7 @@ class NcnnDetector {
     external fun nativeRelease()
     external fun nativeGetModelInputSize(): Int
     external fun nativeGetTimings(): FloatArray
+    external fun nativeSetTargetSize(size: Int)
 
     // uinput
     external fun nativeUinputCreate(screenW: Int, screenH: Int): Int
